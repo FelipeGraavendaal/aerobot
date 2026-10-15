@@ -1,0 +1,20 @@
+# Blueprint de Render: despliega AeroBot (FastAPI + frontend estático) como un solo servicio web.
+services:
+  - type: web
+    name: aerobot
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: ANTHROPIC_API_KEY
+        sync: false        # Render la pide al desplegar; vacía = modo demo
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-4-5
+      - key: OPEN_METEO_API_KEY
+        sync: false
