@@ -8,6 +8,8 @@ Ejecutar:  cd backend && pytest -q
 import os
 
 os.environ["AEROBOT_FORCE_MOCK_LLM"] = "1"
+os.environ["AEROBOT_ALERT_SCAN_MIN"] = "0"
+os.environ["AEROBOT_POI_FILE"] = "/tmp/aerobot-test-pois.json"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,7 +26,7 @@ def offline(monkeypatch):
     async def fail(*_a, **_k):
         raise http_mod.UpstreamError("offline (test)")
 
-    for mod in ("app.services.aviation", "app.services.radar", "app.services.models"):
+    for mod in ("app.services.aviation", "app.services.radar", "app.services.models", "app.alerts.collector"):
         monkeypatch.setattr(f"{mod}.get_json", fail)
 
 

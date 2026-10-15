@@ -22,7 +22,8 @@ aerobot/
 │   │       ├── radar.py         # dBZ estimado (Z-R) + frames RainViewer
 │   │       ├── models.py        # GFS vs ECMWF (Open-Meteo) + malla de viento
 │   │       └── geo.py           # Haversine, destino geodésico, u/v
-│   ├── tests/test_aerobot.py    # 8 tests sin red (unitarios, tools, REST y WebSocket)
+│   ├── app/alerts/              # POIs, motor de reglas, recolector, despachador, simulacros
+│   ├── tests/                   # 18 tests sin red (agente, tools, alertas, REST y WebSocket)
 │   ├── requirements.txt
 │   ├── pytest.ini
 │   └── .env.example
@@ -72,6 +73,39 @@ Usuario ─► /ws/chat ─► AeroBotAgent.run()
 - Máximo `AEROBOT_MAX_ITERATIONS` ciclos; si se agotan, se fuerza una síntesis con `tool_choice: none`.
 - El historial por sesión se recorta sin romper pares `tool_use`/`tool_result`.
 - `POST /api/chat` devuelve lo mismo en una sola respuesta: `{reply, map_commands[], tool_trace[], session_id, mode, usage}`.
+
+## Alertas: despachador de riesgos climáticos
+
+Transforma la telemetría que toca un **Lugar de Interés (POI)** en una directriz inmediata de 4 líneas:
+
+```
+[🔴 RIESGO ALTO · Núcleo de 57 dBZ a 14 km, aproximándose (probable granizo)]
+[Aeropuerto AMB (SCEL), Pudahuel]
+[15:25–16:30 hora local · inicia en 25 min]
+[Suspender operaciones en plataforma y llevar aeronaves a hangar; demorar despegues]
+```
+
+- **Nivel, lugar y tiempo son deterministas** (`alerts/rules.py`): umbrales explícitos por tipo de lugar (aeropuerto, puerto, obra, evento, ruta, agrícola, urbano). El LLM solo redacta la acción; si rompe el contrato (saludos, emojis, >35 palabras, líneas alteradas) se repara con los bloques del motor o con el catálogo de acciones.
+- **Niveles:** 🔴 RIESGO ALTO · 🟠 RIESGO MODERADO · 🟡 PRECAUCIÓN. El potencial convectivo de modelos nunca llega a rojo y la visibilidad pronosticada se limita a PRECAUCIÓN hasta que un METAR la confirme.
+- **Tiempo de impacto:** `EN CURSO` solo con observación (METAR/radar); los pronósticos dicen `DESDE AHORA … según pronóstico` o la ventana en hora local. Las celdas de radar calculan ETA con el viento rector de 700 hPa.
+- **Escaneo automático** cada `AEROBOT_ALERT_SCAN_MIN` minutos (15 por defecto) con solo 2 peticiones a Open-Meteo para todos los POI + METAR de aeropuertos. Nunca se generan alertas reales con datos simulados: las fuentes caídas se reportan en `data_gaps`.
+- **Simulacros** etiquetados `SIMULACRO` para probar la cadena completa.
+
+| Endpoint | Uso |
+|---|---|
+| `GET /api/alerts` · `POST /api/alerts/scan` | Último escaneo / forzar escaneo |
+| `POST /api/alerts/evaluate` | Telemetría externa (sensor, grúa, estación propia) -> directriz |
+| `GET /api/alerts/scenarios` · `POST /api/alerts/simulate/{id}` | Simulacros |
+| `GET/POST /api/pois` · `DELETE /api/pois/{id}` | Lugares de Interés |
+
+Ejemplo de integración (anemómetro de una grúa):
+
+```bash
+curl -X POST https://TU-APP/api/alerts/evaluate -H 'content-type: application/json' \
+  -d '{"poi_id":"stgo-centro","telemetry":[{"gust_kt":47,"source":"anemómetro grúa 2"}]}'
+```
+
+En el chat, AeroBot usa la herramienta `dispatch_risk_alert` ("¿qué alerta hay para el aeropuerto de Santiago?").
 
 ## Fuentes de datos
 

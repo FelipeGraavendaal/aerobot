@@ -92,6 +92,19 @@ export class MapController {
     this.onPointSelected(this.selectedPoint);
   }
 
+  /** Dibuja los Lugares de Interés coloreados por nivel de riesgo. */
+  setPOIs(pois) {
+    (this.poiMarkers || []).forEach((m) => m.remove());
+    const cls = { 3: "lv-red", 2: "lv-orange", 1: "lv-yellow", 0: "lv-green" };
+    this.poiMarkers = pois.map((p) => {
+      const el = document.createElement("div");
+      el.className = `poi-marker ${cls[p.level] || "lv-green"}`;
+      el.title = p.name;
+      const popup = new maplibregl.Popup({ offset: 10, closeButton: false }).setText(p.name);
+      return new maplibregl.Marker({ element: el }).setLngLat([p.lon, p.lat]).setPopup(popup).addTo(this.map);
+    });
+  }
+
   clearSelectedPoint() {
     this.selectedPoint = null;
     this.selectMarker?.remove();

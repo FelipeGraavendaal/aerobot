@@ -23,10 +23,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
+from datetime import datetime, timezone
+
+from .agent import tools as agent_tools
 from .agent.mock_llm import MockAnthropic
+from .alerts.dispatcher import Dispatcher
+from .alerts.pois import POI, POIStore
+from .alerts.rules import Telemetry
+from .alerts.scenarios import SCENARIOS
+from .alerts.service import AlertService
 from .agent.runner import AeroBotAgent, AgentResult, trim_history
 from .config import settings
-from .schemas import ChatRequest, ChatResponse
+from .schemas import ChatRequest, ChatResponse, EvaluateRequest, POICreate
 from .services.http import UpstreamError, close_client
 from .services.models import wind_grid
 from .services.radar import rainviewer_frames
@@ -75,8 +83,13 @@ async def lifespan(app: FastAPI):
     app.state.mode = mode
     app.state.agent = AeroBotAgent(client, settings.anthropic_model, settings.max_tokens, settings.max_agent_iterations)
     app.state.sessions = SessionStore()
+    dispatcher = Dispatcher(client, settings.anthropic_model, use_llm=(mode == "anthropic"))
+    app.state.alerts = AlertService(POIStore(settings.poi_file), dispatcher, settings.alert_scan_minutes)
+    agent_tools.ALERT_SERVICE = app.state.alerts
+    app.state.alerts.start()
     log.info("AeroBot listo · modo=%s · modelo=%s", mode, settings.anthropic_model if mode == "anthropic" else "mock")
     yield
+    await app.state.alerts.stop()
     await close_client()
 
 
@@ -148,6 +161,90 @@ async def api_wind_grid(
         return await wind_grid(r(south), r(west), r(north), r(east), nx, ny)
     except UpstreamError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Alertas y Lugares de Interés
+# ---------------------------------------------------------------------------
+def _poi_out(p: POI) -> dict:
+    return {"id": p.id, "name": p.name, "lat": p.lat, "lon": p.lon, "type": p.type,
+            "radius_km": p.radius_km, "timezone": p.timezone, "icao": p.icao, "custom": p.custom}
+
+
+@app.get("/api/pois")
+async def list_pois():
+    return [_poi_out(p) for p in app.state.alerts.store.list()]
+
+
+@app.post("/api/pois", status_code=201)
+async def create_poi(body: POICreate):
+    try:
+        poi = app.state.alerts.store.add(**body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _poi_out(poi)
+
+
+@app.delete("/api/pois/{poi_id}", status_code=204)
+async def delete_poi(poi_id: str):
+    poi = app.state.alerts.store.get(poi_id)
+    if poi is None:
+        raise HTTPException(status_code=404, detail="Lugar no encontrado")
+    if not poi.custom:
+        raise HTTPException(status_code=403, detail="Los lugares predefinidos no se pueden eliminar")
+    app.state.alerts.store.delete(poi_id)
+
+
+@app.get("/api/alerts")
+async def get_alerts():
+    svc: AlertService = app.state.alerts
+    if svc.latest()["generated_at"] is None:
+        return await svc.scan()
+    return svc.latest()
+
+
+@app.post("/api/alerts/scan")
+async def scan_alerts():
+    return await app.state.alerts.scan()
+
+
+@app.get("/api/alerts/scenarios")
+async def list_scenarios():
+    return [{"id": k, "title": v["title"], "poi_id": v["poi_id"]} for k, v in SCENARIOS.items()]
+
+
+@app.post("/api/alerts/simulate/{scenario_id}")
+async def simulate_alert(scenario_id: str):
+    try:
+        return await app.state.alerts.simulate(scenario_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Simulacro no encontrado: {exc}") from exc
+
+
+@app.post("/api/alerts/evaluate")
+async def evaluate_alert(body: EvaluateRequest):
+    """Telemetría externa -> directriz. Requiere poi_id registrado o un poi ad hoc."""
+    store = app.state.alerts.store
+    if body.poi_id:
+        poi = store.get(body.poi_id)
+        if poi is None:
+            raise HTTPException(status_code=404, detail="Lugar no encontrado")
+    elif body.poi:
+        try:
+            poi = POI("ad-hoc", **body.poi.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    else:
+        raise HTTPException(status_code=422, detail="Indica poi_id o poi")
+    now = datetime.now(timezone.utc)
+
+    def utc(d: datetime | None) -> datetime:
+        d = d or now
+        return d.astimezone(timezone.utc) if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+    telemetry = [Telemetry(**{**t.model_dump(), "valid_at": utc(t.valid_at), "simulated": body.simulated})
+                 for t in body.telemetry]
+    return await app.state.alerts.evaluate(poi, telemetry)
 
 
 # ---------------------------------------------------------------------------

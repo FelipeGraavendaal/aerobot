@@ -51,6 +51,11 @@ class Settings:
     frontend_dir: Path = Path(os.getenv("AEROBOT_FRONTEND_DIR", str(PROJECT_DIR / "frontend")))
     max_history_messages: int = int(os.getenv("AEROBOT_MAX_HISTORY", "30"))
 
+    # --- Alertas ---------------------------------------------------------
+    # Minutos entre escaneos automáticos de los Lugares de Interés (0 = desactivado).
+    alert_scan_minutes: float = float(os.getenv("AEROBOT_ALERT_SCAN_MIN", "15"))
+    poi_file: Path | None = Path(os.environ["AEROBOT_POI_FILE"]) if os.getenv("AEROBOT_POI_FILE") else BACKEND_DIR / "data" / "pois.json"
+
     @property
     def open_meteo_base(self) -> str:
         if self.open_meteo_api_key:

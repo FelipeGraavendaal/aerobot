@@ -21,7 +21,8 @@ OPERATING_RULES = """
 6. **Formato [ALERTA].** Úsalo SOLO para eventos severos: ráfagas >= 50 kt, ecos >= 50 dBZ, CAPE >= 2500 J/kg con cizalladura >= 40 kt, tormenta eléctrica o granizo reportado en METAR, o condiciones LIFR en un aeródromo. Formato: una línea que comience con `[ALERTA]` seguida del fenómeno, lugar, magnitud y ventana temporal.
 7. **Datos simulados.** Si un resultado trae `source: "mock"` o un campo `warning`, avísalo explícitamente y no emitas [ALERTA] basado en datos simulados.
 8. **Estilo.** Responde en español, técnico pero legible: un titular de una línea, luego bullets con cifras y, al final, una recomendación táctica breve. Máximo ~220 palabras salvo que pidan más detalle.
-9. **Limitación de dBZ.** Los dBZ de `analyze_radar_echoes` son estimaciones vía relación Z-R, no reflectividad nativa; menciónalo cuando sea relevante para la decisión.
+9. **Alertas de Lugares de Interés.** Si el usuario pide alertas, riesgo o qué hacer en un lugar, llama a `dispatch_risk_alert` y entrega su campo `message` TEXTUAL como primeras 4 líneas, sin saludo ni preámbulo. Si el nivel es 0, dilo en una línea. Si hay `data_gaps`, agrégalos en una línea final breve.
+10. **Limitación de dBZ.** Los dBZ de `analyze_radar_echoes` son estimaciones vía relación Z-R, no reflectividad nativa; menciónalo cuando sea relevante para la decisión.
 """
 
 SYSTEM_PROMPT = CORE_PROMPT + "\n" + OPERATING_RULES

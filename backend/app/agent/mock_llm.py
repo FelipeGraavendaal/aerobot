@@ -76,9 +76,21 @@ def _resolve_location(text: str) -> tuple[float, float]:
     return PLACES["santiago"]
 
 
+# Palabras clave -> id de Lugar de Interés registrado.
+POI_KEYWORDS = {
+    "scel": "scel", "pudahuel": "scel", "aeropuerto de santiago": "scel", "punta arenas": "scci", "scci": "scci",
+    "valparaiso": "puerto-valpo", "casablanca": "casablanca", "libertadores": "los-libertadores",
+    "santiago": "stgo-centro",
+}
+
+
 def _plan_tools(text: str) -> list[ToolUseBlock]:
     t = _norm(text.split("<contexto_mapa>")[0])
     lat, lon = _resolve_location(text)
+    if re.search(r"alerta|riesgo|despach|que hago|que hacer|peligro", t):
+        poi_id = next((pid for kw, pid in POI_KEYWORDS.items() if kw in t), None)
+        args = {"poi_id": poi_id} if poi_id else {"lat": lat, "lon": lon, "name": "Punto seleccionado"}
+        return [ToolUseBlock("dispatch_risk_alert", args)]
     want_avi = re.search(r"metar|taf|aerodromo|aeropuerto|visibilidad|techo|vfr|ifr|aterriz|despeg|pista", t)
     want_radar = re.search(r"radar|lluvia|precipitac|eco|dbz|chubasc|granizo", t)
     want_models = re.search(r"modelo|gfs|ecmwf|cape|cin\b|conveccion|inestabil|pronostico|cizall", t)
@@ -120,6 +132,17 @@ def _fmt(v, unit="", nd=0):
 
 
 def _compose(results: dict[str, dict]) -> str:
+    alert = results.get("dispatch_risk_alert")
+    if alert:
+        if "error" in alert:
+            return f"No pude evaluar el lugar: {alert['error']}"
+        if alert["level"] == 0:
+            out = "Sin riesgo meteorológico relevante en las próximas 24 h para ese lugar."
+        else:
+            out = alert["message"]
+        if alert.get("data_gaps"):
+            out += "\n\nDatos faltantes: " + "; ".join(alert["data_gaps"]) + "."
+        return out
     lines, alerts, mock = [], [], False
     for name, r in results.items():
         if r.get("source") == "mock" or r.get("warning"):

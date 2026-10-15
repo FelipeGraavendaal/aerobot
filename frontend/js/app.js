@@ -3,6 +3,7 @@
  */
 import { MapController } from "./map.js";
 import { ChatClient, renderMarkdown } from "./chat.js";
+import { AlertsController } from "./alerts.js";
 
 const $ = (sel) => document.querySelector(sel);
 const messagesEl = $("#messages");
@@ -15,6 +16,7 @@ const TOOL_LABELS = {
   analyze_radar_echoes: "Radar dBZ",
   compare_atmospheric_models: "GFS vs ECMWF",
   trigger_map_layer_update: "Control de mapa",
+  dispatch_risk_alert: "Despachador de riesgos",
 };
 
 // ----------------------------------------------------------------- Mapa
@@ -27,6 +29,7 @@ const mapCtrl = new MapController({
     document.querySelectorAll(".layer-bar button").forEach((b) => b.classList.toggle("active", b.dataset.layer === type));
   },
   onPointSelected: (pt) => {
+    alerts?.setSelectedPoint(pt);
     selectedEl.hidden = !pt;
     if (pt) {
       selectedEl.innerHTML = `<span>Punto de análisis: ${pt.lat.toFixed(3)}, ${pt.lon.toFixed(3)}</span><button type="button" aria-label="Quitar punto">✕</button>`;
@@ -37,6 +40,34 @@ const mapCtrl = new MapController({
 
 document.querySelectorAll(".layer-bar button").forEach((btn) =>
   btn.addEventListener("click", () => mapCtrl.setLayer(btn.dataset.layer)));
+
+// ---------------------------------------------------------------- Alertas
+const alerts = new AlertsController({
+  mapCtrl,
+  els: {
+    scanBtn: $("#scan-btn"), scenarioSelect: $("#scenario-select"), scanMeta: $("#scan-meta"),
+    alertList: $("#alert-list"), poiList: $("#poi-list"), poiForm: $("#poi-form"),
+    poiName: $("#poi-name"), poiType: $("#poi-type"), poiHint: $("#poi-hint"), toast: $("#toast"),
+  },
+  onCountChange: (n) => {
+    const b = $("#alert-count");
+    b.hidden = n === 0;
+    b.textContent = n;
+  },
+});
+
+function showTab(tab) {
+  const panel = $("#chat-panel");
+  panel.dataset.tab = tab;
+  $("#alerts-view").hidden = tab !== "alerts";
+  document.querySelectorAll(".tabs button").forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on);
+  });
+}
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+$("#toast").addEventListener("click", () => showTab("alerts"));
 
 // --------------------------------------------------------------- Mensajes
 let current = null; // burbuja del bot en curso { el, trace, chips }
@@ -157,4 +188,4 @@ fetch("/api/health").then((r) => r.json()).then((h) => {
   }
 }).catch(() => {});
 
-window.aerobot = { mapCtrl, chat }; // útil para depurar desde la consola
+window.aerobot = { mapCtrl, chat, alerts }; // útil para depurar desde la consola

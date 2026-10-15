@@ -91,7 +91,28 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["layer_type", "focus_lat", "focus_lon", "zoom_level"],
         },
     },
+    {
+        "name": "dispatch_risk_alert",
+        "description": (
+            "Despachador de riesgos: evalúa con datos reales (METAR, radar, pronóstico 24 h) un Lugar de "
+            "Interés y devuelve la directriz de 4 líneas [NIVEL] [LUGAR] [TIEMPO] [ACCIÓN] calculada por un "
+            "motor de reglas determinista. Usa `poi_id` si el lugar ya está registrado (scel, stgo-centro, "
+            "puerto-valpo, casablanca, los-libertadores, scci) o lat/lon + nombre + tipo para un lugar ad hoc."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "poi_id": {"type": "string", "description": "Id de un Lugar de Interés registrado."},
+                **_LATLON,
+                "name": {"type": "string", "maxLength": 80, "description": "Nombre del lugar ad hoc."},
+                "poi_type": {"type": "string", "enum": ["aeropuerto", "puerto", "obra", "evento", "ruta", "agricola", "urbano"]},
+            },
+        },
+    },
 ]
+
+# Lo inyecta main.py al arrancar (evita importaciones circulares).
+ALERT_SERVICE = None
 
 
 @dataclass
@@ -127,11 +148,32 @@ async def trigger_map_layer_update(ctx: ToolContext, layer_type: str, focus_lat:
     return {"status": "ok", "message": f"Mapa actualizado a la capa '{layer_type}' en ({lat:.2f}, {lon:.2f}) zoom {command['zoom_level']}."}
 
 
+async def dispatch_risk_alert(poi_id: str | None = None, lat: float | None = None, lon: float | None = None,
+                              name: str | None = None, poi_type: str = "urbano") -> dict:
+    if ALERT_SERVICE is None:
+        raise ValueError("Servicio de alertas no inicializado")
+    from ..alerts.pois import POI
+
+    if poi_id:
+        poi = ALERT_SERVICE.store.get(poi_id)
+        if poi is None:
+            raise ValueError(f"No existe el Lugar de Interés '{poi_id}'")
+    elif lat is not None and lon is not None:
+        poi = POI("ad-hoc", (name or f"Punto {lat:.3f}, {lon:.3f}")[:80], lat, lon, poi_type or "urbano", 30)
+    else:
+        raise ValueError("Indica poi_id o lat/lon")
+    alert = await ALERT_SERVICE.evaluate_live(poi)
+    return {"message": alert["message"], "level": alert["level"], "dispatcher": alert["dispatcher"],
+            "hazards": alert["hazards"], "data_gaps": alert["data_gaps"], "sources": alert["sources"],
+            "map_hint": alert["map_hint"], "source": "alertas"}
+
+
 # Herramientas de datos: nombre -> (función, argumentos permitidos)
 _DATA_TOOLS: dict[str, tuple[Callable[..., Awaitable[dict]], set[str]]] = {
     "fetch_aviation_weather": (fetch_aviation_weather, {"lat", "lon"}),
     "analyze_radar_echoes": (analyze_radar_echoes, {"lat", "lon", "radius_km"}),
     "compare_atmospheric_models": (compare_atmospheric_models, {"lat", "lon", "hours_ahead"}),
+    "dispatch_risk_alert": (dispatch_risk_alert, {"poi_id", "lat", "lon", "name", "poi_type"}),
 }
 
 

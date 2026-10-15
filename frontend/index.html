@@ -40,6 +40,42 @@
         <button id="toggle-panel" class="icon-btn" aria-label="Contraer panel">⌄</button>
       </header>
 
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="chat" class="active" aria-selected="true">Chat</button>
+        <button role="tab" data-tab="alerts" aria-selected="false">Alertas <span id="alert-count" class="badge" hidden>0</span></button>
+      </nav>
+
+      <!-- ===== Vista: Alertas ===== -->
+      <section id="alerts-view" class="alerts-view" hidden>
+        <div class="alerts-toolbar">
+          <button id="scan-btn" class="btn">Escanear ahora</button>
+          <select id="scenario-select" class="btn" aria-label="Simulacro">
+            <option value="">Simulacro…</option>
+          </select>
+          <span id="scan-meta" class="scan-meta"></span>
+        </div>
+        <div id="alert-list" class="alert-list"></div>
+
+        <h2 class="section-title">Lugares de interés</h2>
+        <ul id="poi-list" class="poi-list"></ul>
+
+        <form id="poi-form" class="poi-form" hidden>
+          <div class="poi-form-title">Agregar el punto seleccionado</div>
+          <input id="poi-name" maxlength="80" placeholder="Nombre (ej. Obra Torre Norte)" required />
+          <select id="poi-type">
+            <option value="urbano">Urbano</option>
+            <option value="aeropuerto">Aeropuerto</option>
+            <option value="puerto">Puerto</option>
+            <option value="obra">Obra / faena</option>
+            <option value="evento">Evento al aire libre</option>
+            <option value="ruta">Ruta / paso</option>
+            <option value="agricola">Agrícola</option>
+          </select>
+          <button class="btn primary" type="submit">Guardar lugar</button>
+        </form>
+        <p id="poi-hint" class="hint">Toca el mapa para elegir un punto y agregarlo como lugar de interés.</p>
+      </section>
+
       <section id="messages" class="messages" aria-live="polite">
         <div class="msg bot">
           <div class="bubble">
@@ -50,6 +86,7 @@
       </section>
 
       <div class="suggestions" id="suggestions">
+        <button>¿Qué alerta hay para el aeropuerto de Santiago?</button>
         <button>¿Cómo está el METAR de Santiago (SCEL)?</button>
         <button>Analiza los ecos de radar en este punto</button>
         <button>Compara GFS vs ECMWF para convección en las próximas 48 h</button>
@@ -65,6 +102,8 @@
       </form>
     </aside>
   </div>
+
+  <div id="toast" class="toast" role="alert" hidden></div>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script type="module" src="js/app.js"></script>
