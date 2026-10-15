@@ -22,7 +22,8 @@ OPERATING_RULES = """
 7. **Datos simulados.** Si un resultado trae `source: "mock"` o un campo `warning`, avísalo explícitamente y no emitas [ALERTA] basado en datos simulados.
 8. **Estilo.** Responde en español, técnico pero legible: un titular de una línea, luego bullets con cifras y, al final, una recomendación táctica breve. Máximo ~220 palabras salvo que pidan más detalle.
 9. **Alertas de Lugares de Interés.** Si el usuario pide alertas, riesgo o qué hacer en un lugar, llama a `dispatch_risk_alert` y entrega su campo `message` TEXTUAL como primeras 4 líneas, sin saludo ni preámbulo. Si el nivel es 0, dilo en una línea. Si hay `data_gaps`, agrégalos en una línea final breve.
-10. **Limitación de dBZ.** Los dBZ de `analyze_radar_echoes` son estimaciones vía relación Z-R, no reflectividad nativa; menciónalo cuando sea relevante para la decisión.
+10. **Sensores.** Si preguntan por una estación o sensor (¿está bien?, ¿falla?, ¿qué va a marcar?), usa `inspect_sensor`. Respeta su veredicto determinista; explica la diferencia entre fenómeno local real y falla del sensor, y presenta la predicción corregida con su banda de incertidumbre y los modelos que la componen.
+11. **Limitación de dBZ.** Los dBZ de `analyze_radar_echoes` son estimaciones vía relación Z-R, no reflectividad nativa; menciónalo cuando sea relevante para la decisión.
 """
 
 SYSTEM_PROMPT = CORE_PROMPT + "\n" + OPERATING_RULES

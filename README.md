@@ -23,7 +23,8 @@ aerobot/
 │   │       ├── models.py        # GFS vs ECMWF (Open-Meteo) + malla de viento
 │   │       └── geo.py           # Haversine, destino geodésico, u/v
 │   ├── app/alerts/              # POIs, motor de reglas, recolector, despachador, simulacros
-│   ├── tests/                   # 18 tests sin red (agente, tools, alertas, REST y WebSocket)
+│   ├── app/sensors/             # fuentes libres, consenso 8 modelos, QC, predicción, intérprete
+│   ├── tests/                   # 26 tests sin red (agente, tools, alertas, sensores, REST y WebSocket)
 │   ├── requirements.txt
 │   ├── pytest.ini
 │   └── .env.example
@@ -106,6 +107,31 @@ curl -X POST https://TU-APP/api/alerts/evaluate -H 'content-type: application/js
 ```
 
 En el chat, AeroBot usa la herramienta `dispatch_risk_alert` ("¿qué alerta hay para el aeropuerto de Santiago?").
+
+## Sensores: validación multimodelo, predicción e interpretación del agente
+
+AeroBot "ayuda" a los sensores: cada lectura se contrasta con el consenso de **8 modelos** y con sus vecinos para decidir si es confiable, y se usa para corregir la predicción local.
+
+| Pieza | Detalle |
+|---|---|
+| Sensores (datos libres) | METAR NOAA (global, historial 6 h) · openSenseMap (estaciones ciudadanas) · sensores propios vía API |
+| Modelos | GFS, ECMWF IFS, ICON, GEM, JMA, Météo-France, UKMO (Open-Meteo, 1 petición para todos los sensores) + MET Norway (gratuito, por punto) |
+| Corrección de altura | Temperatura −6,5 °C/km, rocío −1,8 °C/km, presión en estación hipsométrica |
+| QC determinista (`sensors/qc.py`) | Rango físico · valor pegado (solo si los modelos esperan cambio) · salto brusco · z = desvío / √(dispersión² + piso²) · chequeo de vecinos ≤50 km |
+| Veredictos | consistente · fenómeno local (vecinos confirman: los modelos fallan) · desviación · dudoso · falla probable (vecinos coinciden con los modelos) · sin referencia |
+| Predicción (`sensors/predict.py`) | `mediana(h) + sesgo·e^(−h/τ)`, τ = 6 h temperatura, 3 h viento, 2 h ráfaga; banda = rango entre modelos + error de representación |
+| Interpretación | Claude explica en 4 líneas (Lectura, Diagnóstico, Predicción, Acción) sin cambiar el veredicto; sin LLM se redacta por reglas |
+| Alertas | Un sensor propio con `poi_id` alimenta al despachador solo si su confianza es ≥ 45 %; las variables con falla o dudosas se excluyen |
+
+```bash
+# Registrar un sensor propio y enviarle lecturas
+curl -X POST $APP/api/sensors -H 'content-type: application/json' \
+  -d '{"slug":"grua-1","name":"Anemómetro grúa 1","lat":-33.44,"lon":-70.65,"poi_id":"stgo-centro"}'
+curl -X POST $APP/api/sensors/custom:grua-1/readings -H 'content-type: application/json' \
+  -d '{"gust_kt":41,"wind_kt":22,"temp_c":19.5}'
+```
+
+Endpoints: `GET /api/sensors?south&west&north&east` · `GET /api/sensors/{id}/report` · `POST /api/sensors/{id}/interpret` · `POST /api/sensors` · `POST /api/sensors/{id}/readings`. En el chat: "¿El sensor de SCEL está fallando?" usa la herramienta `inspect_sensor`.
 
 ## Fuentes de datos
 

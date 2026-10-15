@@ -39,6 +39,7 @@ class AlertService:
         self.scan_minutes = scan_minutes
         self._latest: dict[str, Any] = {"generated_at": None, "alerts": [], "pois": [], "data_gaps": {}}
         self._simulations: list[dict] = []
+        self._sensor_alerts: list[dict] = []
         self._lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
 
@@ -103,12 +104,20 @@ class AlertService:
             log.info("Escaneo de alertas: %d POI, %d alertas", len(pois), len(alerts))
             return self.latest()
 
+    def add_sensor_alert(self, alert: dict) -> None:
+        """Alerta originada por un sensor propio validado (vigente 2 h, una por lugar)."""
+        alert["origin"] = "sensor"
+        self._sensor_alerts = [a for a in self._sensor_alerts if a["poi"]["id"] != alert["poi"]["id"]] + [alert]
+
     def latest(self) -> dict:
         now = datetime.now(timezone.utc)
         self._simulations = [s for s in self._simulations
                              if datetime.fromisoformat(s["generated_at"]) > now - SIMULATION_TTL]
+        self._sensor_alerts = [s for s in self._sensor_alerts
+                               if datetime.fromisoformat(s["generated_at"]) > now - timedelta(hours=2)]
         out = dict(self._latest)
-        out["alerts"] = sorted(self._latest["alerts"] + self._simulations, key=lambda x: (-x["level"], x["simulated"]))
+        out["alerts"] = sorted(self._latest["alerts"] + self._sensor_alerts + self._simulations,
+                               key=lambda x: (-x["level"], x["simulated"]))
         out["scan_minutes"] = self.scan_minutes
         return out
 

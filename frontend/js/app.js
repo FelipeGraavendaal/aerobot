@@ -4,6 +4,7 @@
 import { MapController } from "./map.js";
 import { ChatClient, renderMarkdown } from "./chat.js";
 import { AlertsController } from "./alerts.js";
+import { SensorsController } from "./sensors.js";
 
 const $ = (sel) => document.querySelector(sel);
 const messagesEl = $("#messages");
@@ -17,6 +18,7 @@ const TOOL_LABELS = {
   compare_atmospheric_models: "GFS vs ECMWF",
   trigger_map_layer_update: "Control de mapa",
   dispatch_risk_alert: "Despachador de riesgos",
+  inspect_sensor: "Validación de sensor",
 };
 
 // ----------------------------------------------------------------- Mapa
@@ -56,10 +58,21 @@ const alerts = new AlertsController({
   },
 });
 
+const sensors = new SensorsController({
+  mapCtrl,
+  els: {
+    scanBtn: $("#sensor-scan"), demoBtn: $("#sensor-demo"), meta: $("#sensor-meta"), list: $("#sensor-list"),
+    listWrap: $("#sensor-list-wrap"), detail: $("#sensor-detail"), detailBody: $("#sensor-detail-body"), back: $("#sensor-back"),
+  },
+});
+let sensorsLoaded = false;
+
 function showTab(tab) {
   const panel = $("#chat-panel");
   panel.dataset.tab = tab;
   $("#alerts-view").hidden = tab !== "alerts";
+  $("#sensors-view").hidden = tab !== "sensors";
+  if (tab === "sensors" && !sensorsLoaded) { sensorsLoaded = true; sensors.load(); }
   document.querySelectorAll(".tabs button").forEach((b) => {
     const on = b.dataset.tab === tab;
     b.classList.toggle("active", on);
@@ -188,4 +201,4 @@ fetch("/api/health").then((r) => r.json()).then((h) => {
   }
 }).catch(() => {});
 
-window.aerobot = { mapCtrl, chat, alerts }; // útil para depurar desde la consola
+window.aerobot = { mapCtrl, chat, alerts, sensors }; // útil para depurar desde la consola

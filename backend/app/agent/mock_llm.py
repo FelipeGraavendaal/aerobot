@@ -87,6 +87,10 @@ POI_KEYWORDS = {
 def _plan_tools(text: str) -> list[ToolUseBlock]:
     t = _norm(text.split("<contexto_mapa>")[0])
     lat, lon = _resolve_location(text)
+    if re.search(r"sensor|estacion|calibr|falla|anemometro|termometro", t):
+        icao = re.search(r"\b(sc[a-z]{2}|sa[a-z]{2}|k[a-z]{3})\b", t)
+        args = {"sensor_id": f"metar:{icao.group(1).upper()}"} if icao else {"lat": lat, "lon": lon}
+        return [ToolUseBlock("inspect_sensor", args)]
     if re.search(r"alerta|riesgo|despach|que hago|que hacer|peligro", t):
         poi_id = next((pid for kw, pid in POI_KEYWORDS.items() if kw in t), None)
         args = {"poi_id": poi_id} if poi_id else {"lat": lat, "lon": lon, "name": "Punto seleccionado"}
@@ -132,6 +136,13 @@ def _fmt(v, unit="", nd=0):
 
 
 def _compose(results: dict[str, dict]) -> str:
+    sensor = results.get("inspect_sensor")
+    if sensor:
+        if "error" in sensor:
+            return f"No pude validar el sensor: {sensor['error']}"
+        head = f"**{sensor['sensor']['name']}** · confianza {int(sensor['confidence'] * 100)} % · modelos: {', '.join(sensor['models']) or 'ninguno'}"
+        gaps = ("\n\nDatos faltantes: " + "; ".join(sensor["data_gaps"])) if sensor.get("data_gaps") else ""
+        return f"{head}\n\n{sensor['interpretation']}{gaps}"
     alert = results.get("dispatch_risk_alert")
     if alert:
         if "error" in alert:

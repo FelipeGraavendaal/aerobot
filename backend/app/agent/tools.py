@@ -111,8 +111,24 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
 ]
 
-# Lo inyecta main.py al arrancar (evita importaciones circulares).
+TOOL_DEFINITIONS.append({
+    "name": "inspect_sensor",
+    "description": (
+        "Valida un sensor meteorológico (METAR, openSenseMap o sensor propio) contra el consenso de hasta 8 "
+        "modelos (GFS, ECMWF, ICON, GEM, JMA, Météo-France, UKMO, MET Norway) y sus vecinos: detecta fallas "
+        "(valor pegado, salto, fuera de rango) o fenómenos locales que los modelos no captan, entrega una "
+        "predicción 0-12 h corregida por el sesgo observado y una interpretación en 4 líneas. Usa `sensor_id` "
+        "(p. ej. 'metar:SCEL') o lat/lon para el sensor más cercano."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {"sensor_id": {"type": "string", "description": "Id del sensor, p. ej. 'metar:SCEL'."}, **_LATLON},
+    },
+})
+
+# Los inyecta main.py al arrancar (evita importaciones circulares).
 ALERT_SERVICE = None
+SENSOR_SERVICE = None
 
 
 @dataclass
@@ -168,12 +184,36 @@ async def dispatch_risk_alert(poi_id: str | None = None, lat: float | None = Non
             "map_hint": alert["map_hint"], "source": "alertas"}
 
 
+async def inspect_sensor(sensor_id: str | None = None, lat: float | None = None, lon: float | None = None) -> dict:
+    if SENSOR_SERVICE is None:
+        raise ValueError("Servicio de sensores no inicializado")
+    if not sensor_id:
+        if lat is None or lon is None:
+            raise ValueError("Indica sensor_id o lat/lon")
+        net = await SENSOR_SERVICE.network(lat - 0.5, lon - 0.6, lat + 0.5, lon + 0.6)
+        if not net["sensors"]:
+            return {"error": "No hay sensores con datos frescos a ~50 km", "data_gaps": net["data_gaps"], "source": "sensores"}
+        from ..services.geo import haversine_km
+        sensor_id = min(net["sensors"], key=lambda x: haversine_km(lat, lon, x["sensor"]["lat"], x["sensor"]["lon"]))["sensor"]["id"]
+    try:
+        r = await SENSOR_SERVICE.interpretation(sensor_id)
+    except KeyError:
+        raise ValueError(f"Sensor '{sensor_id}' no encontrado; prueba con lat/lon")
+    pred = {v: [x for x in p["series"] if x["h"] in (0, 3, 6, 12)] for v, p in r["prediction"].items()}
+    return {"sensor": r["sensor"], "status": r["status"], "confidence": r["confidence"],
+            "interpretation": r["interpretation"], "interpreter": r["interpreter"],
+            "checks": [{k: c[k] for k in ("variable", "observed", "consensus_median", "spread", "z", "verdict", "reason")}
+                       for c in r["checks"]],
+            "models": r["consensus_sources"], "prediction": pred, "data_gaps": r.get("data_gaps", []), "source": "sensores"}
+
+
 # Herramientas de datos: nombre -> (función, argumentos permitidos)
 _DATA_TOOLS: dict[str, tuple[Callable[..., Awaitable[dict]], set[str]]] = {
     "fetch_aviation_weather": (fetch_aviation_weather, {"lat", "lon"}),
     "analyze_radar_echoes": (analyze_radar_echoes, {"lat", "lon", "radius_km"}),
     "compare_atmospheric_models": (compare_atmospheric_models, {"lat", "lon", "hours_ahead"}),
     "dispatch_risk_alert": (dispatch_risk_alert, {"poi_id", "lat", "lon", "name", "poi_type"}),
+    "inspect_sensor": (inspect_sensor, {"sensor_id", "lat", "lon"}),
 }
 
 

@@ -215,3 +215,42 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   background: #1a0f10; color: #fff; border: 1px solid var(--lv-red); box-shadow: 0 10px 30px rgba(0,0,0,.5); cursor: pointer;
 }
 .toast.lv-orange { border-color: var(--lv-orange); background: #1b130b; }
+
+/* =====================================================================
+   Sensores (QC multimodelo)
+   ===================================================================== */
+:root { --st-ok: #22c55e; --st-local: #38bdf8; --st-dev: #eab308; --st-doubt: #f97316; --st-fail: #ef4444; --st-none: #64748b; }
+#chat-panel[data-tab="sensors"] .messages,
+#chat-panel[data-tab="sensors"] .suggestions,
+#chat-panel[data-tab="sensors"] .composer { display: none; }
+.st-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--st-none); flex: 0 0 auto; vertical-align: middle; }
+.st-ok { --c: var(--st-ok); } .st-local { --c: var(--st-local); } .st-dev { --c: var(--st-dev); }
+.st-doubt { --c: var(--st-doubt); } .st-fail { --c: var(--st-fail); } .st-none { --c: var(--st-none); }
+.st-dot.st-ok, .st-dot.st-local, .st-dot.st-dev, .st-dot.st-doubt, .st-dot.st-fail, .st-dot.st-none { background: var(--c); }
+.st-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--muted); margin: 10px 0 4px; }
+.st-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.sensor-list { display: flex; flex-direction: column; }
+.sensor-row {
+  display: flex; align-items: center; gap: 8px; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--border);
+  background: none; color: var(--text); text-align: left; cursor: pointer; font: 13px/1.3 inherit;
+}
+.sensor-row:hover { background: var(--panel-2); }
+.sensor-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sensor-net { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.sensor-marker {
+  width: 14px; height: 14px; border-radius: 50%; border: 2px solid #0b1016; background: var(--c, var(--st-none));
+  box-shadow: 0 0 0 1px rgba(255,255,255,.6); cursor: pointer; padding: 0;
+}
+.sensor-detail { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.sensor-head { display: flex; flex-direction: column; gap: 6px; }
+.sensor-title { font-weight: 700; font-size: 15px; }
+.sensor-badge { align-self: flex-start; font-size: 12px; font-weight: 600; padding: 4px 8px; border-radius: 999px;
+  color: #0b1016; background: var(--c, var(--st-none)); }
+.qc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.qc-table th { text-align: left; color: var(--muted); font-weight: 600; padding: 4px; border-bottom: 1px solid var(--border); }
+.qc-table td { padding: 5px 4px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.pred-chart { width: 100%; height: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+.pred-band { fill: rgba(56, 189, 248, .18); stroke: none; }
+.pred-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.pred-axis { fill: var(--muted); font-size: 9px; font-family: ui-monospace, Menlo, monospace; }
+.interp-box { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); }

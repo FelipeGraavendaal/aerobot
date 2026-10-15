@@ -96,3 +96,28 @@ class EvaluateRequest(BaseModel):
     poi: POICreate | None = None
     telemetry: list[TelemetryIn] = Field(min_length=1, max_length=200)
     simulated: bool = False
+
+
+# --------------------------------------------------------------------------
+# Sensores
+# --------------------------------------------------------------------------
+class SensorCreate(BaseModel):
+    slug: str = Field(min_length=2, max_length=40, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str = Field(min_length=2, max_length=80)
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    elevation_m: float | None = Field(default=None, ge=-500, le=9000)
+    poi_id: str | None = Field(default=None, description="Lugar de Interés al que alimenta alertas")
+
+
+class SensorReadingIn(BaseModel):
+    time: datetime | None = None
+    temp_c: float | None = None
+    dewpoint_c: float | None = None
+    rh_pct: float | None = None
+    pressure_hpa: float | None = Field(default=None, description="Presión a nivel del mar (QNH)")
+    station_pressure: float | None = Field(default=None, description="Presión absoluta en la estación")
+    wind_kt: float | None = None
+    wind_dir: float | None = None
+    gust_kt: float | None = None
+    precip_mm_h: float | None = None

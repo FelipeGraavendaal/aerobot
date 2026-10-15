@@ -31,7 +31,7 @@ def get_client() -> httpx.AsyncClient:
     if _client is None or _client.is_closed:
         _client = httpx.AsyncClient(
             timeout=httpx.Timeout(settings.http_timeout_s),
-            headers={"User-Agent": "AeroBot/1.0 (+https://github.com/sociale/aerobot)"},
+            headers={"User-Agent": "AeroBot/1.0 github.com/FelipeGraavendaal/aerobot"},
             follow_redirects=True,
         )
     return _client

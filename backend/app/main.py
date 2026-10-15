@@ -34,7 +34,8 @@ from .alerts.scenarios import SCENARIOS
 from .alerts.service import AlertService
 from .agent.runner import AeroBotAgent, AgentResult, trim_history
 from .config import settings
-from .schemas import ChatRequest, ChatResponse, EvaluateRequest, POICreate
+from .schemas import ChatRequest, ChatResponse, EvaluateRequest, POICreate, SensorCreate, SensorReadingIn
+from .sensors.service import SensorService
 from .services.http import UpstreamError, close_client
 from .services.models import wind_grid
 from .services.radar import rainviewer_frames
@@ -86,6 +87,9 @@ async def lifespan(app: FastAPI):
     dispatcher = Dispatcher(client, settings.anthropic_model, use_llm=(mode == "anthropic"))
     app.state.alerts = AlertService(POIStore(settings.poi_file), dispatcher, settings.alert_scan_minutes)
     agent_tools.ALERT_SERVICE = app.state.alerts
+    app.state.sensors = SensorService(client, settings.anthropic_model, use_llm=(mode == "anthropic"),
+                                      alert_service=app.state.alerts)
+    agent_tools.SENSOR_SERVICE = app.state.sensors
     app.state.alerts.start()
     log.info("AeroBot listo · modo=%s · modelo=%s", mode, settings.anthropic_model if mode == "anthropic" else "mock")
     yield
@@ -245,6 +249,55 @@ async def evaluate_alert(body: EvaluateRequest):
     telemetry = [Telemetry(**{**t.model_dump(), "valid_at": utc(t.valid_at), "simulated": body.simulated})
                  for t in body.telemetry]
     return await app.state.alerts.evaluate(poi, telemetry)
+
+
+# ---------------------------------------------------------------------------
+# Sensores: validación multimodelo, predicción e interpretación del agente
+# ---------------------------------------------------------------------------
+@app.get("/api/sensors")
+async def list_sensors(south: float = Query(ge=-90, le=90), west: float = Query(ge=-180, le=180),
+                       north: float = Query(ge=-90, le=90), east: float = Query(ge=-180, le=180)):
+    if north <= south or east <= west:
+        raise HTTPException(status_code=422, detail="bbox inválido")
+    if (north - south) * (east - west) > 400:
+        raise HTTPException(status_code=422, detail="Área demasiado grande: acerca el mapa (máx. ~20°×20°)")
+    return await app.state.sensors.network(south, west, north, east)
+
+
+@app.get("/api/sensors/{sensor_id}/report")
+async def sensor_report(sensor_id: str):
+    try:
+        return await app.state.sensors.report(sensor_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Sensor no encontrado: lista primero la zona") from exc
+
+
+@app.post("/api/sensors/{sensor_id}/interpret")
+async def sensor_interpret(sensor_id: str):
+    try:
+        return await app.state.sensors.interpretation(sensor_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Sensor no encontrado: lista primero la zona") from exc
+
+
+@app.post("/api/sensors", status_code=201)
+async def register_sensor(body: SensorCreate):
+    if body.poi_id and app.state.alerts.store.get(body.poi_id) is None:
+        raise HTTPException(status_code=422, detail="poi_id no existe")
+    s = app.state.sensors.register(**body.model_dump())
+    return {"id": s.id, "name": s.name, "lat": s.lat, "lon": s.lon, "poi_id": s.poi_id}
+
+
+@app.post("/api/sensors/{sensor_id}/readings")
+async def post_reading(sensor_id: str, body: SensorReadingIn):
+    if app.state.sensors.custom.get(sensor_id) is None:
+        raise HTTPException(status_code=404, detail="Sensor no registrado (POST /api/sensors primero)")
+    values = {k: v for k, v in body.model_dump(exclude={"time"}).items() if v is not None}
+    if not values:
+        raise HTTPException(status_code=422, detail="La lectura no trae variables")
+    t = body.time or datetime.now(timezone.utc)
+    t = t.astimezone(timezone.utc) if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    return await app.state.sensors.ingest(sensor_id, t, values)
 
 
 # ---------------------------------------------------------------------------

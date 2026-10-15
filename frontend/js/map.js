@@ -105,6 +105,19 @@ export class MapController {
     });
   }
 
+  /** Dibuja los sensores coloreados por veredicto de control de calidad. */
+  setSensors(sensors, onClick) {
+    (this.sensorMarkers || []).forEach((m) => m.remove());
+    this.sensorMarkers = sensors.map((s) => {
+      const el = document.createElement("button");
+      el.className = `sensor-marker ${s.cls}`;
+      el.title = s.label;
+      el.setAttribute("aria-label", s.label);
+      el.addEventListener("click", (e) => { e.stopPropagation(); onClick?.(s.id); });
+      return new maplibregl.Marker({ element: el }).setLngLat([s.lon, s.lat]).addTo(this.map);
+    });
+  }
+
   clearSelectedPoint() {
     this.selectedPoint = null;
     this.selectMarker?.remove();

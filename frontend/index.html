@@ -43,7 +43,29 @@
       <nav class="tabs" role="tablist">
         <button role="tab" data-tab="chat" class="active" aria-selected="true">Chat</button>
         <button role="tab" data-tab="alerts" aria-selected="false">Alertas <span id="alert-count" class="badge" hidden>0</span></button>
+        <button role="tab" data-tab="sensors" aria-selected="false">Sensores</button>
       </nav>
+
+      <!-- ===== Vista: Sensores ===== -->
+      <section id="sensors-view" class="alerts-view" hidden>
+        <div id="sensor-list-wrap">
+          <div class="alerts-toolbar">
+            <button id="sensor-scan" class="btn primary">Validar sensores de la zona</button>
+            <button id="sensor-demo" class="btn">Probar sensor con falla</button>
+            <span id="sensor-meta" class="scan-meta">METAR, openSenseMap y sensores propios contra 8 modelos (GFS, ECMWF, ICON, GEM, JMA, Météo-France, UKMO, MET Norway).</span>
+          </div>
+          <div class="st-legend">
+            <span><i class="st-dot st-ok"></i>Consistente</span><span><i class="st-dot st-local"></i>Fenómeno local</span>
+            <span><i class="st-dot st-dev"></i>Desviación</span><span><i class="st-dot st-doubt"></i>Dudoso</span>
+            <span><i class="st-dot st-fail"></i>Falla</span>
+          </div>
+          <div id="sensor-list" class="sensor-list"></div>
+        </div>
+        <div id="sensor-detail" hidden>
+          <button id="sensor-back" class="btn small">← Volver</button>
+          <div id="sensor-detail-body" class="sensor-detail"></div>
+        </div>
+      </section>
 
       <!-- ===== Vista: Alertas ===== -->
       <section id="alerts-view" class="alerts-view" hidden>
