@@ -92,6 +92,26 @@ export class MapController {
     this.onPointSelected(this.selectedPoint);
   }
 
+  /** Dibuja una geometría calculada (p. ej. el cono de un incendio). Se mantiene al cambiar de capa. */
+  async setOverlay(geojson) {
+    await this.ready;
+    if (this.map.getSource("ops-overlay")) {
+      this.map.getSource("ops-overlay").setData(geojson);
+      return;
+    }
+    this.map.addSource("ops-overlay", { type: "geojson", data: geojson });
+    this.map.addLayer({ id: "ops-overlay-fill", type: "fill", source: "ops-overlay", filter: ["==", ["geometry-type"], "Polygon"],
+      paint: { "fill-color": ["case", ["==", ["get", "level"], 3], "#ef4444", "#f97316"], "fill-opacity": 0.28 } });
+    this.map.addLayer({ id: "ops-overlay-line", type: "line", source: "ops-overlay", filter: ["==", ["geometry-type"], "Polygon"],
+      paint: { "line-color": ["case", ["==", ["get", "level"], 3], "#ef4444", "#f97316"], "line-width": 2 } });
+    this.map.addLayer({ id: "ops-overlay-point", type: "circle", source: "ops-overlay", filter: ["==", ["geometry-type"], "Point"],
+      paint: { "circle-radius": 6, "circle-color": "#fde047", "circle-stroke-color": "#7f1d1d", "circle-stroke-width": 2 } });
+  }
+
+  clearOverlay() {
+    this.map.getSource("ops-overlay")?.setData({ type: "FeatureCollection", features: [] });
+  }
+
   /** Dibuja los Lugares de Interés coloreados por nivel de riesgo. */
   setPOIs(pois) {
     (this.poiMarkers || []).forEach((m) => m.remove());
@@ -130,6 +150,7 @@ export class MapController {
     const { lat, lon } = cmd.focus;
     this.map.flyTo({ center: [lon, lat], zoom: cmd.zoom_level, speed: 1.4, curve: 1.4, essential: true });
     this._setFocusMarker(lat, lon, cmd.annotation);
+    if (cmd.overlay) this.setOverlay(cmd.overlay);
     // Esperar al fin del vuelo evita recargar la malla de viento dos veces.
     await new Promise((res) => {
       if (!this.map.isMoving()) return res();

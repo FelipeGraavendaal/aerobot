@@ -5,6 +5,7 @@ import { MapController } from "./map.js";
 import { ChatClient, renderMarkdown } from "./chat.js";
 import { AlertsController } from "./alerts.js";
 import { SensorsController } from "./sensors.js";
+import { OpsController } from "./ops.js";
 
 const $ = (sel) => document.querySelector(sel);
 const messagesEl = $("#messages");
@@ -19,6 +20,12 @@ const TOOL_LABELS = {
   trigger_map_layer_update: "Control de mapa",
   dispatch_risk_alert: "Despachador de riesgos",
   inspect_sensor: "Validación de sensor",
+  calculate_flight_envelope: "Go/No-Go UAV",
+  run_fire_spread_vector: "Propagación de incendio",
+  calculate_runoff_isotherm: "Escorrentía e isoterma",
+  audit_historical_weather: "Auditor climático",
+  evaluate_supply_chain_risk: "Mitigación 72 h",
+  trigger_supply_chain_webhook: "Webhook logístico",
 };
 
 // ----------------------------------------------------------------- Mapa
@@ -66,13 +73,17 @@ const sensors = new SensorsController({
   },
 });
 let sensorsLoaded = false;
+const ops = new OpsController({ mapCtrl, root: $("#ops-view") });
+let opsLoaded = false;
 
 function showTab(tab) {
   const panel = $("#chat-panel");
   panel.dataset.tab = tab;
   $("#alerts-view").hidden = tab !== "alerts";
   $("#sensors-view").hidden = tab !== "sensors";
+  $("#ops-view").hidden = tab !== "ops";
   if (tab === "sensors" && !sensorsLoaded) { sensorsLoaded = true; sensors.load(); }
+  if (tab === "ops" && !opsLoaded) { opsLoaded = true; ops.renderMitigationState().catch(() => {}); }
   document.querySelectorAll(".tabs button").forEach((b) => {
     const on = b.dataset.tab === tab;
     b.classList.toggle("active", on);
@@ -201,4 +212,4 @@ fetch("/api/health").then((r) => r.json()).then((h) => {
   }
 }).catch(() => {});
 
-window.aerobot = { mapCtrl, chat, alerts, sensors }; // útil para depurar desde la consola
+window.aerobot = { mapCtrl, chat, alerts, sensors, ops }; // útil para depurar desde la consola

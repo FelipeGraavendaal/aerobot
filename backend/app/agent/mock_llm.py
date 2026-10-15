@@ -87,6 +87,23 @@ POI_KEYWORDS = {
 def _plan_tools(text: str) -> list[ToolUseBlock]:
     t = _norm(text.split("<contexto_mapa>")[0])
     lat, lon = _resolve_location(text)
+    if re.search(r"\bdron|uav|ventana de vuelo|volar|vuelo|go ?/ ?no", t):
+        kt = re.search(r"(\d{1,2})\s*(nudos|kt)", t)
+        return [ToolUseBlock("calculate_flight_envelope", {"lat": lat, "lon": lon, "max_wind_knots": float(kt.group(1)) if kt else 25})]
+    if re.search(r"incendio|fuego|propagaci", t):
+        return [ToolUseBlock("run_fire_spread_vector", {"lat": lat, "lon": lon, "fuel": "matorral" if "matorral" in t else "pastizal"})]
+    if re.search(r"aluvion|crecida|escorrentia|isoterma|caudal", t):
+        area = re.search(r"(\d+(?:\.\d+)?)\s*km", t)
+        return [ToolUseBlock("calculate_runoff_isotherm", {"lat": lat, "lon": lon, "catchment_area_km2": float(area.group(1)) if area else 50.0})]
+    if re.search(r"dia caido|auditor|paraliz|fuerza mayor|peritaje|certific", t):
+        from datetime import date, timedelta
+        d = re.search(r"(\d{4})-(\d{2})-(\d{2})", t) or None
+        d2 = re.search(r"(\d{1,2})[-/](\d{1,2})[-/](\d{4})", t)
+        day = d.group(0) if d else (f"{d2.group(3)}-{int(d2.group(2)):02d}-{int(d2.group(1)):02d}" if d2 else (date.today() - timedelta(days=1)).isoformat())
+        kt = re.search(r"(\d{1,2})\s*(nudos|kt)", t)
+        return [ToolUseBlock("audit_historical_weather", {"lat": lat, "lon": lon, "date": day, "threshold_knots": float(kt.group(1)) if kt else 38})]
+    if re.search(r"mitigaci|supply|abastec|protocolo|orden de compra|inminente|logistic", t):
+        return [ToolUseBlock("evaluate_supply_chain_risk", {"simulate": "simul" in t})]
     if re.search(r"sensor|estacion|calibr|falla|anemometro|termometro", t):
         icao = re.search(r"\b(sc[a-z]{2}|sa[a-z]{2}|k[a-z]{3})\b", t)
         args = {"sensor_id": f"metar:{icao.group(1).upper()}"} if icao else {"lat": lat, "lon": lon}
@@ -135,7 +152,46 @@ def _fmt(v, unit="", nd=0):
     return f"{v:.{nd}f}{unit}" if isinstance(v, (int, float)) else f"{v}{unit}"
 
 
+def _compose_enterprise(results: dict[str, dict]) -> str | None:
+    for name in ("calculate_flight_envelope", "run_fire_spread_vector", "calculate_runoff_isotherm",
+                 "audit_historical_weather", "evaluate_supply_chain_risk"):
+        r = results.get(name)
+        if r is None:
+            continue
+        if "error" in r:
+            return f"No pude completar el cálculo: {r['error']}"
+        notes = r.get("notes") or []
+        if name == "calculate_flight_envelope":
+            out = [r["summary"]]
+            if r.get("next_hour_below_threshold"):
+                out.append(f"- Próxima hora con viento crítico < {r['criteria']['max_wind_kt']:.0f} kt: {r['next_hour_below_threshold']['local']}.")
+            if r.get("next_window"):
+                out.append(f"- Próxima ventana apta: {r['next_window']['start_local']} → {r['next_window']['end_local']} hora local.")
+        elif name == "run_fire_spread_vector":
+            n = r["now"]
+            out = [f"**Propagación estimada ({r['fuel']['name']}, Anderson {r['fuel']['anderson']})**",
+                   f"- Avance de cabeza {n['ros_head_m_min']} m/min hacia {n['heading_deg']}° · retaguardia {n['ros_back_m_min']} m/min · L/B {n['length_to_breadth']}.",
+                   f"- φ_W = {n['phi_w']}, φ_S = {n['phi_s']} (pendiente {r['terrain']['slope_pct']} % hacia {r['terrain']['upslope_bearing']}°) · humedad combustible {n['fuel_moisture_pct']} % (T {n['temp_c']} °C, HR {n['rh_pct']} %).",
+                   f"- Regla 30-30-30: {'CUMPLIDA' if r['rule_30_30_30_now'] else 'no se cumple'} ahora. Cono de 1 h y 3 h dibujado en el mapa."]
+        elif name == "calculate_runoff_isotherm":
+            pk = r["peak"]
+            out = [r["alert"] or "Sin escorrentía crítica en 48 h.",
+                   f"- Faena a {r['site_elevation_m']:.0f} m · isoterma en el pico {pk['freezing_level_m']:.0f} m · i = {pk['intensity_mm_h']} mm/h · Q = 0,278·{pk['c_eff']}·{pk['intensity_mm_h']}·{r['catchment']['area_km2']}·{pk['contributing_fraction']} = {pk['q_m3s']} m³/s.",
+                   f"- Precipitación total {r['total_precip_mm']} mm."]
+        elif name == "audit_historical_weather":
+            out = [r["report_text"], "", f"PDF: {r['pdf_url']}"]
+        else:
+            out = [x["message"] for x in r.get("results", []) if "message" in x] or ["Sin eventos de impacto en las próximas 72 h para los Lugares de Interés."]
+        if notes:
+            out.append("\nNotas: " + " ".join(notes))
+        return "\n".join(out)
+    return None
+
+
 def _compose(results: dict[str, dict]) -> str:
+    ent = _compose_enterprise(results)
+    if ent:
+        return ent
     sensor = results.get("inspect_sensor")
     if sensor:
         if "error" in sensor:
@@ -223,7 +279,7 @@ class _MockMessages:
             calls = _plan_tools(last["content"])
             return MockResponse([TextBlock("Consultando fuentes de datos…"), *calls], "tool_use")
 
-        # 2) Llegaron tool_results -> redactar respuesta final
+        # 2) Llegaron tool_results -> (incendio: dibujar el cono) o redactar respuesta final
         id_to_name = {}
         for msg in messages:
             if msg["role"] == "assistant":
@@ -234,6 +290,20 @@ class _MockMessages:
         for block in last["content"]:
             if block.get("type") == "tool_result":
                 results[id_to_name.get(block["tool_use_id"], "?")] = json.loads(block["content"])
+        fire = results.get("run_fire_spread_vector")
+        if fire and fire.get("overlay_id") and not (tool_choice and tool_choice.get("type") == "none"):
+            return MockResponse([ToolUseBlock("trigger_map_layer_update", {
+                "layer_type": "wind_particles", "focus_lat": fire["cone_center"][0], "focus_lon": fire["cone_center"][1],
+                "zoom_level": fire.get("suggested_zoom", 11), "overlay_id": fire["overlay_id"], "annotation": "Foco y cono de peligro"})], "tool_use")
+        if "trigger_map_layer_update" in results and len(results) == 1:
+            # Tras dibujar el cono, se responde con el resultado del incendio del turno anterior.
+            for msg in reversed(messages[:-1]):
+                if msg["role"] == "user" and isinstance(msg["content"], list):
+                    for block in msg["content"]:
+                        if block.get("type") == "tool_result" and id_to_name.get(block["tool_use_id"]) == "run_fire_spread_vector":
+                            results["run_fire_spread_vector"] = json.loads(block["content"])
+                    break
+            results.pop("trigger_map_layer_update", None)
         return MockResponse([TextBlock(_compose(results))], "end_turn")
 
 

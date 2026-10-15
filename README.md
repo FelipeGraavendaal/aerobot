@@ -24,7 +24,8 @@ aerobot/
 │   │       └── geo.py           # Haversine, destino geodésico, u/v
 │   ├── app/alerts/              # POIs, motor de reglas, recolector, despachador, simulacros
 │   ├── app/sensors/             # fuentes libres, consenso 8 modelos, QC, predicción, intérprete
-│   ├── tests/                   # 26 tests sin red (agente, tools, alertas, sensores, REST y WebSocket)
+│   ├── app/enterprise/          # UAV Go/No-Go, Rothermel, escorrentía, auditor + PDF, mitigación/webhooks
+│   ├── tests/                   # 38 tests sin red (agente, alertas, sensores, módulos Enterprise, REST y WebSocket)
 │   ├── requirements.txt
 │   ├── pytest.ini
 │   └── .env.example
@@ -132,6 +133,31 @@ curl -X POST $APP/api/sensors/custom:grua-1/readings -H 'content-type: applicati
 ```
 
 Endpoints: `GET /api/sensors?south&west&north&east` · `GET /api/sensors/{id}/report` · `POST /api/sensors/{id}/interpret` · `POST /api/sensors` · `POST /api/sensors/{id}/readings`. En el chat: "¿El sensor de SCEL está fallando?" usa la herramienta `inspect_sensor`.
+
+## AeroBot Enterprise (V2.0): motor Go/No-Go, impacto geográfico, auditor y mitigación
+
+El System Prompt Enterprise (`agent/prompts.py`) orquesta cuatro módulos. Todos los cálculos los hace código determinista (`app/enterprise/`); el LLM interpreta y redacta.
+
+| Módulo | Herramienta del agente | Cálculo | Endpoint |
+|---|---|---|---|
+| 1 · Go/No-Go UAV | `calculate_flight_envelope(lat, lon, max_wind_knots, max_agl_meters)` | Perfil 10/50/80/120 m (50 m por ley potencial con α local), β = \|ΔV⃗\|/ΔZ en 10–50 y 50–80 m (rechazo si > 0,1 s⁻¹), ráfagas, visibilidad VLOS, METAR a ≤30 km prevalece. Próxima ventana y próxima hora < 25 kt | `GET /api/ops/flight-envelope` |
+| 2a · Incendios | `run_fire_spread_vector(lat, lon, humidity, wind_dir, wind_speed)` | Rothermel (clases muertas 1/10/100 h de Anderson), humedad de Simard (T/HR ≈ VPD), pendiente del DEM, suma vectorial viento+pendiente, elipse de Anderson (1983). GeoJSON a 1 h y 3 h dibujado con `trigger_map_layer_update(overlay_id)` | `POST /api/ops/fire` |
+| 2b · Aluviones | `calculate_runoff_isotherm(...)` | Isoterma 0 °C vs cota de faena, fracción de cuenca bajo la isoterma, `Q = 0,278·C·i·A_eff`, +0,2 en C si la isoterma sube ≥500 m/24 h (lluvia sobre nieve) | `POST /api/ops/runoff` |
+| 3 · Auditor | `audit_historical_weather(lat, lon, date, threshold_knots)` | METAR histórico (Iowa Mesonet) + ERA5 + lecturas del cliente: media, σ, P95, máximo, minutos y ventanas sobre el umbral. `exceeded` booleano + datos crudos + PDF | `POST /api/audit`, `GET /api/audit/{id}.pdf` |
+| 4 · Mitigación | `evaluate_supply_chain_risk`, `trigger_supply_chain_webhook(client_id, action, item)` | Detector 72 h (helada radiativa T<0 °C con nubes <10 %, viento ≥38 kt, lluvia/nieve intensas) → protocolo → webhooks firmados HMAC | `/api/mitigation/*` |
+
+**Política de webhooks "automático con límites":** una acción se ejecuta sola solo si viene de un evento de riesgo ALTO detectado por el motor (nunca por iniciativa del LLM), está habilitada para el cliente y su monto es ≤ al tope (`auto_max_amount_clp`, 1.000.000 CLP por defecto). Todo lo demás queda **pendiente de aprobación** en la pestaña Ops. Hay idempotencia por evento y bitácora. Los simulacros solo llegan al receptor interno de prueba. Define `AEROBOT_ADMIN_TOKEN` para exigir token al aprobar o configurar clientes.
+
+Conectar el sistema real de un cliente:
+
+```bash
+curl -X POST $APP/api/mitigation/clients -H 'content-type: application/json' -H "X-Admin-Token: $TOKEN" -d '{
+  "id": "vina-sur", "name": "Viña Sur", "secret": "clave-hmac",
+  "webhooks": {"pre_aprobar_compra": "https://hooks.zapier.com/...", "activar_iot": "https://riego.example.com/api/on"},
+  "auto_max_amount_clp": 800000, "auto_actions": ["activar_iot", "alertar_proveedor"]}'
+```
+
+**Límites honestos:** no hay viento medido gratis a 50/120 m (se usa modelo e interpolación, y se declara); el METAR histórico es cada 30–60 min (el "minuto a minuto" requiere las lecturas del sensor del cliente); Rothermel aquí es una estimación de planificación; los informes del auditor son evidencia técnica que debe firmar un profesional, no una certificación legal.
 
 ## Fuentes de datos
 

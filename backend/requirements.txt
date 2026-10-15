@@ -5,6 +5,7 @@ anthropic>=0.40
 python-dotenv>=1.0
 pydantic>=2.7,<3.0
 tzdata>=2024.1
+reportlab>=4.0
 
 # Desarrollo / tests
 pytest>=8.0

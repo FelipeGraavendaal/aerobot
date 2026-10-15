@@ -254,3 +254,34 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .pred-line { fill: none; stroke: var(--accent); stroke-width: 2; }
 .pred-axis { fill: var(--muted); font-size: 9px; font-family: ui-monospace, Menlo, monospace; }
 .interp-box { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); }
+
+/* =====================================================================
+   Ops (AeroBot Enterprise)
+   ===================================================================== */
+#chat-panel[data-tab="ops"] .messages,
+#chat-panel[data-tab="ops"] .suggestions,
+#chat-panel[data-tab="ops"] .composer { display: none; }
+.tabs button { font-size: 12px; padding-left: 2px; padding-right: 2px; }
+.ops-card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); padding: 0 12px; }
+.ops-card[open] { padding-bottom: 12px; }
+.ops-card summary { cursor: pointer; padding: 12px 0; font-weight: 700; font-size: 14px; }
+.ops-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 10px; }
+.ops-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); min-width: 0; }
+.ops-form input, .ops-form select {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px; font: 13px inherit; min-width: 0; width: 100%;
+}
+.ops-out { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.ops-out:empty { display: none; }
+.ops-pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+.ops-pre.crit { border-color: var(--lv-red); }
+.ops-error { color: var(--alert); font-size: 13px; }
+.verdict { font: 800 15px/1.2 ui-monospace, Menlo, monospace; padding: 10px; border-radius: 8px; text-align: center; letter-spacing: .5px; }
+.verdict.go { background: rgba(34, 197, 94, .15); color: #4ade80; border: 1px solid #22c55e; }
+.verdict.nogo { background: rgba(239, 68, 68, .15); color: #f87171; border: 1px solid #ef4444; }
+.hour-strip { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; }
+.hour-strip span { height: 14px; border-radius: 2px; }
+.hour-strip .ok { background: #22c55e; } .hour-strip .no { background: #ef4444; }
+.mit-row { border: 1px solid var(--border); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.mit-log { font: 11px/1.4 ui-monospace, Menlo, monospace; color: var(--muted); border-bottom: 1px solid var(--border); padding: 4px 0; overflow-wrap: anywhere; }
+a.btn { text-decoration: none; display: inline-block; }

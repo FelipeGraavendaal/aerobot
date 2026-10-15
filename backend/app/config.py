@@ -54,6 +54,9 @@ class Settings:
     # --- Alertas ---------------------------------------------------------
     # Minutos entre escaneos automáticos de los Lugares de Interés (0 = desactivado).
     alert_scan_minutes: float = float(os.getenv("AEROBOT_ALERT_SCAN_MIN", "15"))
+    mitigation_scan_minutes: float = float(os.getenv("AEROBOT_MITIGATION_SCAN_MIN", "60"))
+    # Si se define, aprobar acciones y configurar clientes exige el header X-Admin-Token.
+    admin_token: str | None = os.getenv("AEROBOT_ADMIN_TOKEN") or None
     poi_file: Path | None = Path(os.environ["AEROBOT_POI_FILE"]) if os.getenv("AEROBOT_POI_FILE") else BACKEND_DIR / "data" / "pois.json"
 
     @property

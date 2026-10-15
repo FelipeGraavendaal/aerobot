@@ -87,6 +87,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "zoom_level": {"type": "number", "minimum": 2, "maximum": 12, "description": "Zoom del mapa (2 global - 12 local)."},
                 "annotation": {"type": "string", "maxLength": 140,
                                "description": "Texto opcional para un marcador en el punto de foco (p. ej. 'Celda 52 dBZ')."},
+                "overlay_id": {"type": "string", "description": "Id de una geometría calculada por otra herramienta (p. ej. el cono de `run_fire_spread_vector`) para dibujarla."},
             },
             "required": ["layer_type", "focus_lat", "focus_lon", "zoom_level"],
         },
@@ -126,7 +127,100 @@ TOOL_DEFINITIONS.append({
     },
 })
 
+_ENTERPRISE_TOOLS = [
+    {
+        "name": "calculate_flight_envelope",
+        "description": (
+            "Módulo 1 Go/No-Go UAV. Perfil vertical de viento 10/50/80/120 m AGL, cizalladura vectorial "
+            "β = |ΔV⃗|/ΔZ bajo 100 m, ráfagas, visibilidad y METAR cercano. Devuelve `verdict` "
+            "([VENTANA APROBADA]/[VENTANA RECHAZADA]) con los cálculos y la próxima ventana bajo el umbral."
+        ),
+        "input_schema": {"type": "object", "properties": {
+            **_LATLON,
+            "max_wind_knots": {"type": "number", "minimum": 5, "maximum": 60, "default": 25},
+            "max_agl_meters": {"type": "number", "minimum": 10, "maximum": 120, "default": 120},
+            "hours": {"type": "integer", "minimum": 3, "maximum": 72, "default": 24},
+        }, "required": ["lat", "lon"]},
+    },
+    {
+        "name": "run_fire_spread_vector",
+        "description": (
+            "Módulo 2 incendios. Rothermel con pendiente del DEM y humedad del combustible (T/HR ≈ VPD): tasa de "
+            "avance, vector de máximo avance, regla 30-30-30 y cono GeoJSON a 1 y 3 h. Devuelve `overlay_id` para "
+            "dibujarlo con trigger_map_layer_update (usa `suggested_zoom`). humidity/wind_dir/wind_speed (kt) reemplazan al modelo si se conocen."
+        ),
+        "input_schema": {"type": "object", "properties": {
+            **_LATLON,
+            "humidity": {"type": "number", "minimum": 1, "maximum": 100},
+            "wind_dir": {"type": "number", "minimum": 0, "maximum": 360, "description": "Dirección DESDE la que sopla (°)."},
+            "wind_speed": {"type": "number", "minimum": 0, "maximum": 100, "description": "Viento a 10 m en kt."},
+            "fuel": {"type": "string", "enum": ["pastizal", "pastizal_alto", "matorral", "matorral_denso", "hojarasca"], "default": "pastizal"},
+        }, "required": ["lat", "lon"]},
+    },
+    {
+        "name": "calculate_runoff_isotherm",
+        "description": (
+            "Módulo 2 aluviones. Isoterma 0 °C vs cota de la faena y método racional modificado Q = 0,278·C·i·A_eff "
+            "para las próximas 48 h. Emite 'Escorrentía Crítica por Isoterma Alta' si corresponde."
+        ),
+        "input_schema": {"type": "object", "properties": {
+            **_LATLON,
+            "catchment_area_km2": {"type": "number", "exclusiveMinimum": 0},
+            "catchment_top_m": {"type": "number"},
+            "runoff_coeff": {"type": "number", "minimum": 0.05, "maximum": 0.95, "default": 0.5},
+            "channel_capacity_m3s": {"type": "number"},
+        }, "required": ["lat", "lon", "catchment_area_km2"]},
+    },
+    {
+        "name": "audit_historical_weather",
+        "description": (
+            "Módulo 3 auditor. Para una fecha pasada, analiza METAR histórico de la estación más cercana, ERA5 y "
+            "lecturas del cliente: media, σ, P95 y máximo de ráfagas, minutos y ventanas sobre el umbral. Devuelve "
+            "`exceeded` (bool), `report_text` pericial, `raw_data` y `audit_id` (PDF en /api/audit/{audit_id}.pdf)."
+        ),
+        "input_schema": {"type": "object", "properties": {
+            **_LATLON,
+            "date": {"type": "string", "description": "AAAA-MM-DD"},
+            "threshold_knots": {"type": "number", "minimum": 5, "maximum": 100, "default": 38},
+            "start_hour": {"type": "integer", "minimum": 0, "maximum": 23, "default": 0},
+            "end_hour": {"type": "integer", "minimum": 1, "maximum": 24, "default": 24},
+            "station": {"type": "string", "description": "ICAO opcional (p. ej. SCEL)."},
+        }, "required": ["lat", "lon", "date"]},
+    },
+    {
+        "name": "evaluate_supply_chain_risk",
+        "description": (
+            "Módulo 4. Revisa las próximas 72 h de los Lugares de Interés (heladas por radiación, viento ≥38 kt, "
+            "lluvia o nieve intensas) y ejecuta el protocolo de mitigación con la política de límites del cliente. "
+            "Devuelve el mensaje 'Aviso de impacto inminente…' y el estado de cada acción."
+        ),
+        "input_schema": {"type": "object", "properties": {
+            "client_id": {"type": "string", "default": "demo"},
+            "simulate": {"type": "boolean", "default": False, "description": "true = simulacro de helada en Casablanca."},
+        }},
+    },
+    {
+        "name": "trigger_supply_chain_webhook",
+        "description": (
+            "Dispara la API logística del cliente (compra, IoT o aviso a proveedor). Solo se ejecuta sola si "
+            "proviene de un evento de riesgo alto (`event_id`) y el monto está bajo el tope del cliente; si no, "
+            "queda pendiente de aprobación humana."
+        ),
+        "input_schema": {"type": "object", "properties": {
+            "client_id": {"type": "string"},
+            "action": {"type": "string", "enum": ["pre_aprobar_compra", "activar_iot", "alertar_proveedor"]},
+            "item": {"type": "string", "maxLength": 200},
+            "amount_clp": {"type": "integer", "minimum": 0, "default": 0},
+            "event_id": {"type": "string"},
+            "reason": {"type": "string", "maxLength": 300},
+        }, "required": ["client_id", "action", "item"]},
+    },
+]
+TOOL_DEFINITIONS.extend(_ENTERPRISE_TOOLS)
+
 # Los inyecta main.py al arrancar (evita importaciones circulares).
+MITIGATION_SERVICE = None
+AUDITS: dict[str, dict] = {}
 ALERT_SERVICE = None
 SENSOR_SERVICE = None
 
@@ -146,8 +240,21 @@ class ToolContext:
                 log.debug("No se pudo emitir evento %s", event.get("type"), exc_info=True)
 
 
+OVERLAYS: dict[str, dict] = {}   # overlay_id -> GeoJSON (últimos 50)
+
+
+def store_overlay(geojson: dict) -> str:
+    oid = uuid.uuid4().hex[:8]
+    OVERLAYS[oid] = geojson
+    while len(OVERLAYS) > 50:
+        OVERLAYS.pop(next(iter(OVERLAYS)))
+    return oid
+
+
 async def trigger_map_layer_update(ctx: ToolContext, layer_type: str, focus_lat: float, focus_lon: float,
-                                   zoom_level: float, annotation: str | None = None) -> dict:
+                                   zoom_level: float, annotation: str | None = None, overlay_id: str | None = None) -> dict:
+    if overlay_id and overlay_id not in OVERLAYS:
+        raise ValueError(f"overlay_id '{overlay_id}' no existe")
     if layer_type not in MAP_LAYERS:
         raise ValueError(f"layer_type inválido '{layer_type}'. Opciones: {MAP_LAYERS}")
     lat, lon = validate_coords(focus_lat, focus_lon)
@@ -158,6 +265,7 @@ async def trigger_map_layer_update(ctx: ToolContext, layer_type: str, focus_lat:
         "focus": {"lat": round(lat, 4), "lon": round(lon, 4)},
         "zoom_level": max(2.0, min(float(zoom_level), 12.0)),
         "annotation": (annotation or "")[:140] or None,
+        "overlay": OVERLAYS.get(overlay_id) if overlay_id else None,
     }
     ctx.map_commands.append(command)
     await ctx.emit({"type": "map_command", "command": command})
@@ -207,6 +315,63 @@ async def inspect_sensor(sensor_id: str | None = None, lat: float | None = None,
             "models": r["consensus_sources"], "prediction": pred, "data_gaps": r.get("data_gaps", []), "source": "sensores"}
 
 
+async def calculate_flight_envelope(lat: float, lon: float, max_wind_knots: float = 25, max_agl_meters: float = 120,
+                                    hours: int = 24) -> dict:
+    from ..enterprise.uav import go_no_go
+    r = await go_no_go(lat, lon, hours=hours, max_wind_kt=max_wind_knots, max_agl_m=max_agl_meters)
+    return {**r, "source": r["source"]}
+
+
+async def run_fire_spread_vector(lat: float, lon: float, humidity: float | None = None, wind_dir: float | None = None,
+                                 wind_speed: float | None = None, fuel: str = "pastizal") -> dict:
+    from ..enterprise.fire import fire_spread
+    r = await fire_spread(lat, lon, fuel=fuel, hours=[1, 3], humidity=humidity, wind_dir=wind_dir, wind_speed_kt=wind_speed)
+    r["overlay_id"] = store_overlay(r["cone"])
+    r["cone_center"] = [lat, lon]
+    r.pop("cone")
+    return r
+
+
+async def calculate_runoff_isotherm(lat: float, lon: float, catchment_area_km2: float, catchment_top_m: float | None = None,
+                                    runoff_coeff: float = 0.5, channel_capacity_m3s: float | None = None) -> dict:
+    from ..enterprise.flood import flood_runoff
+    r = await flood_runoff(lat, lon, catchment_area_km2, catchment_top_m, runoff_coeff,
+                           channel_capacity_m3s=channel_capacity_m3s)
+    r["hourly"] = r["hourly"][:24:3]
+    return r
+
+
+async def audit_historical_weather(lat: float, lon: float, date: str, threshold_knots: float = 38, start_hour: int = 0,
+                                   end_hour: int = 24, station: str | None = None) -> dict:
+    from ..enterprise.audit import audit_historical_weather as run_audit
+    r = await run_audit(lat, lon, date, threshold_knots, start_hour, end_hour, station=station)
+    AUDITS[r["audit_id"]] = r
+    while len(AUDITS) > 100:
+        AUDITS.pop(next(iter(AUDITS)))
+    out = {k: v for k, v in r.items() if k != "raw_data"}
+    out["raw_data_points"] = {k: len(v) for k, v in r["raw_data"].items()}
+    out["pdf_url"] = f"/api/audit/{r['audit_id']}.pdf"
+    out["source"] = "auditoría"
+    return out
+
+
+async def evaluate_supply_chain_risk(client_id: str = "demo", simulate: bool = False) -> dict:
+    if MITIGATION_SERVICE is None:
+        raise ValueError("Servicio de mitigación no inicializado")
+    if simulate:
+        return {"results": [await MITIGATION_SERVICE.simulate_frost(client_id=client_id)], "source": "simulacro"}
+    res = await MITIGATION_SERVICE.scan(client_id)
+    return {"results": res, "events_detected": sum(1 for r in res if "event" in r), "source": "mitigación"}
+
+
+async def trigger_supply_chain_webhook(client_id: str, action: str, item: str, amount_clp: int = 0,
+                                       event_id: str | None = None, reason: str | None = None) -> dict:
+    if MITIGATION_SERVICE is None:
+        raise ValueError("Servicio de mitigación no inicializado")
+    r = await MITIGATION_SERVICE.trigger(client_id, action, item, amount_clp, event_id=event_id, reason=reason)
+    return {**r, "source": "webhook"}
+
+
 # Herramientas de datos: nombre -> (función, argumentos permitidos)
 _DATA_TOOLS: dict[str, tuple[Callable[..., Awaitable[dict]], set[str]]] = {
     "fetch_aviation_weather": (fetch_aviation_weather, {"lat", "lon"}),
@@ -214,6 +379,13 @@ _DATA_TOOLS: dict[str, tuple[Callable[..., Awaitable[dict]], set[str]]] = {
     "compare_atmospheric_models": (compare_atmospheric_models, {"lat", "lon", "hours_ahead"}),
     "dispatch_risk_alert": (dispatch_risk_alert, {"poi_id", "lat", "lon", "name", "poi_type"}),
     "inspect_sensor": (inspect_sensor, {"sensor_id", "lat", "lon"}),
+    "calculate_flight_envelope": (calculate_flight_envelope, {"lat", "lon", "max_wind_knots", "max_agl_meters", "hours"}),
+    "run_fire_spread_vector": (run_fire_spread_vector, {"lat", "lon", "humidity", "wind_dir", "wind_speed", "fuel"}),
+    "calculate_runoff_isotherm": (calculate_runoff_isotherm, {"lat", "lon", "catchment_area_km2", "catchment_top_m",
+                                                              "runoff_coeff", "channel_capacity_m3s"}),
+    "audit_historical_weather": (audit_historical_weather, {"lat", "lon", "date", "threshold_knots", "start_hour", "end_hour", "station"}),
+    "evaluate_supply_chain_risk": (evaluate_supply_chain_risk, {"client_id", "simulate"}),
+    "trigger_supply_chain_webhook": (trigger_supply_chain_webhook, {"client_id", "action", "item", "amount_clp", "event_id", "reason"}),
 }
 
 
@@ -224,7 +396,7 @@ async def execute_tool(name: str, args: dict, ctx: ToolContext) -> tuple[dict, b
     is_error = False
     try:
         if name == "trigger_map_layer_update":
-            allowed = {"layer_type", "focus_lat", "focus_lon", "zoom_level", "annotation"}
+            allowed = {"layer_type", "focus_lat", "focus_lon", "zoom_level", "annotation", "overlay_id"}
             result = await trigger_map_layer_update(ctx, **{k: v for k, v in args.items() if k in allowed})
         elif name in _DATA_TOOLS:
             fn, allowed = _DATA_TOOLS[name]

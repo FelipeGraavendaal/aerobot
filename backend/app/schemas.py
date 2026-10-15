@@ -33,6 +33,7 @@ class MapCommand(BaseModel):
     focus: LatLon
     zoom_level: float
     annotation: str | None = None
+    overlay: dict | None = None          # GeoJSON a dibujar (p. ej. cono de incendio)
 
 
 class ToolTrace(BaseModel):
@@ -121,3 +122,53 @@ class SensorReadingIn(BaseModel):
     wind_dir: float | None = None
     gust_kt: float | None = None
     precip_mm_h: float | None = None
+
+
+# --------------------------------------------------------------------------
+# Enterprise
+# --------------------------------------------------------------------------
+class FireRequest(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    fuel: Literal["pastizal", "pastizal_alto", "matorral", "matorral_denso", "hojarasca"] = "pastizal"
+    humidity: float | None = Field(default=None, ge=1, le=100)
+    wind_dir: float | None = Field(default=None, ge=0, le=360)
+    wind_speed: float | None = Field(default=None, ge=0, le=100, description="kt a 10 m")
+
+
+class RunoffRequest(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    catchment_area_km2: float = Field(gt=0, le=50000)
+    catchment_top_m: float | None = Field(default=None, ge=0, le=9000)
+    runoff_coeff: float = Field(default=0.5, ge=0.05, le=0.95)
+    tc_hours: int = Field(default=1, ge=1, le=24)
+    channel_capacity_m3s: float | None = Field(default=None, gt=0)
+
+
+class ClientReading(BaseModel):
+    time: datetime
+    wind_kt: float | None = Field(default=None, ge=0, le=250)
+    gust_kt: float | None = Field(default=None, ge=0, le=250)
+
+
+class AuditRequest(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    threshold_knots: float = Field(default=38, ge=5, le=100)
+    start_hour: int = Field(default=0, ge=0, le=23)
+    end_hour: int = Field(default=24, ge=1, le=24)
+    station: str | None = Field(default=None, max_length=4)
+    site_name: str | None = Field(default=None, max_length=120)
+    contract_ref: str | None = Field(default=None, max_length=120)
+    client_readings: list[ClientReading] | None = Field(default=None, max_length=5000)
+
+
+class ClientConfig(BaseModel):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,39}$")
+    name: str = Field(min_length=2, max_length=80)
+    webhooks: dict[str, str] = Field(description="acción -> URL https o internal://test-receiver")
+    secret: str = Field(default="", max_length=200)
+    auto_max_amount_clp: int = Field(default=1_000_000, ge=0)
+    auto_actions: list[str] = ["pre_aprobar_compra", "activar_iot", "alertar_proveedor"]

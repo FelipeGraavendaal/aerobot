@@ -18,7 +18,8 @@ import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
@@ -34,8 +35,12 @@ from .alerts.scenarios import SCENARIOS
 from .alerts.service import AlertService
 from .agent.runner import AeroBotAgent, AgentResult, trim_history
 from .config import settings
-from .schemas import ChatRequest, ChatResponse, EvaluateRequest, POICreate, SensorCreate, SensorReadingIn
+from .schemas import (AuditRequest, ChatRequest, ChatResponse, ClientConfig, EvaluateRequest, FireRequest, POICreate,
+                      RunoffRequest, SensorCreate, SensorReadingIn)
 from .sensors.service import SensorService
+from .enterprise.mitigation import MitigationService
+from .enterprise import uav as ent_uav, fire as ent_fire, flood as ent_flood
+from .enterprise.pdf import render_pdf
 from .services.http import UpstreamError, close_client
 from .services.models import wind_grid
 from .services.radar import rainviewer_frames
@@ -90,10 +95,25 @@ async def lifespan(app: FastAPI):
     app.state.sensors = SensorService(client, settings.anthropic_model, use_llm=(mode == "anthropic"),
                                       alert_service=app.state.alerts)
     agent_tools.SENSOR_SERVICE = app.state.sensors
+    app.state.mitigation = MitigationService(app.state.alerts.store)
+    agent_tools.MITIGATION_SERVICE = app.state.mitigation
+    mitigation_task = None
+    if settings.mitigation_scan_minutes > 0:
+        async def _mitigation_loop():
+            await asyncio.sleep(20)
+            while True:
+                try:
+                    await app.state.mitigation.scan()
+                except Exception:
+                    log.exception("Fallo en escaneo de mitigación")
+                await asyncio.sleep(settings.mitigation_scan_minutes * 60)
+        mitigation_task = asyncio.create_task(_mitigation_loop())
     app.state.alerts.start()
     log.info("AeroBot listo · modo=%s · modelo=%s", mode, settings.anthropic_model if mode == "anthropic" else "mock")
     yield
     await app.state.alerts.stop()
+    if mitigation_task:
+        mitigation_task.cancel()
     await close_client()
 
 
@@ -298,6 +318,121 @@ async def post_reading(sensor_id: str, body: SensorReadingIn):
     t = body.time or datetime.now(timezone.utc)
     t = t.astimezone(timezone.utc) if t.tzinfo else t.replace(tzinfo=timezone.utc)
     return await app.state.sensors.ingest(sensor_id, t, values)
+
+
+# ---------------------------------------------------------------------------
+# AeroBot Enterprise: módulos 1-4
+# ---------------------------------------------------------------------------
+def _require_admin(token: str | None) -> None:
+    if settings.admin_token and token != settings.admin_token:
+        raise HTTPException(status_code=401, detail="Requiere X-Admin-Token")
+
+
+async def _guard(coro):
+    try:
+        return await coro
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except UpstreamError as exc:
+        raise HTTPException(status_code=502, detail=f"Fuente de datos no disponible: {exc}") from exc
+
+
+@app.get("/api/ops/flight-envelope")
+async def flight_envelope(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180),
+                          max_wind_knots: float = Query(25, ge=5, le=60), max_agl_meters: float = Query(120, ge=10, le=120),
+                          hours: int = Query(24, ge=3, le=72)):
+    return await _guard(ent_uav.go_no_go(lat, lon, hours=hours, max_wind_kt=max_wind_knots, max_agl_m=max_agl_meters))
+
+
+@app.post("/api/ops/fire")
+async def fire(body: FireRequest):
+    return await _guard(ent_fire.fire_spread(body.lat, body.lon, fuel=body.fuel, hours=[1, 3], humidity=body.humidity,
+                                             wind_dir=body.wind_dir, wind_speed_kt=body.wind_speed))
+
+
+@app.post("/api/ops/runoff")
+async def runoff(body: RunoffRequest):
+    return await _guard(ent_flood.flood_runoff(body.lat, body.lon, body.catchment_area_km2, body.catchment_top_m,
+                                               body.runoff_coeff, body.tc_hours, body.channel_capacity_m3s))
+
+
+@app.post("/api/audit")
+async def audit(body: AuditRequest):
+    from .enterprise.audit import audit_historical_weather as run_audit
+    r = await _guard(run_audit(body.lat, body.lon, body.date, body.threshold_knots, body.start_hour, body.end_hour,
+                               station=body.station, site_name=body.site_name, contract_ref=body.contract_ref,
+                               client_readings=[x.model_dump() for x in body.client_readings or []]))
+    agent_tools.AUDITS[r["audit_id"]] = r
+    return {**{k: v for k, v in r.items() if k != "raw_data"}, "pdf_url": f"/api/audit/{r['audit_id']}.pdf",
+            "raw_url": f"/api/audit/{r['audit_id']}/raw", "raw_data_points": {k: len(v) for k, v in r["raw_data"].items()}}
+
+
+@app.get("/api/audit/{audit_id}.pdf")
+async def audit_pdf(audit_id: str):
+    a = agent_tools.AUDITS.get(audit_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="Auditoría no encontrada (expira al reiniciar el servidor)")
+    return Response(render_pdf(a["pdf_payload"]), media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="aerobot-auditoria-{audit_id}.pdf"'})
+
+
+@app.get("/api/audit/{audit_id}/raw")
+async def audit_raw(audit_id: str):
+    a = agent_tools.AUDITS.get(audit_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="Auditoría no encontrada")
+    return a["raw_data"]
+
+
+@app.get("/api/mitigation")
+async def mitigation_state():
+    return app.state.mitigation.state()
+
+
+@app.post("/api/mitigation/scan")
+async def mitigation_scan(client_id: str = "demo"):
+    return await app.state.mitigation.scan(client_id)
+
+
+@app.post("/api/mitigation/simulate")
+async def mitigation_simulate(client_id: str = "demo"):
+    return await app.state.mitigation.simulate_frost(client_id=client_id)
+
+
+@app.post("/api/mitigation/actions/{action_id}/approve")
+async def mitigation_approve(action_id: str, x_admin_token: str | None = Header(default=None)):
+    _require_admin(x_admin_token)
+    try:
+        return await app.state.mitigation.approve(action_id, approved_by="usuario (app)")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Acción no encontrada o ya resuelta") from exc
+
+
+@app.post("/api/mitigation/actions/{action_id}/reject")
+async def mitigation_reject(action_id: str, x_admin_token: str | None = Header(default=None)):
+    _require_admin(x_admin_token)
+    try:
+        return app.state.mitigation.reject(action_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Acción no encontrada o ya resuelta") from exc
+
+
+@app.post("/api/mitigation/clients", status_code=201)
+async def mitigation_client(body: ClientConfig, x_admin_token: str | None = Header(default=None)):
+    _require_admin(x_admin_token)
+    try:
+        c = app.state.mitigation.upsert_client(**body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"id": c.id, "name": c.name, "webhooks": c.webhooks, "auto_max_amount_clp": c.auto_max_amount_clp}
+
+
+@app.post("/api/mitigation/test-receiver")
+async def mitigation_receiver(payload: dict):
+    """Receptor de prueba: úsalo como URL de webhook para ver qué enviaría AeroBot."""
+    m = app.state.mitigation
+    m.receiver_log = (m.receiver_log + [{"received_at": datetime.now(timezone.utc).isoformat(), "url": "http", "payload": payload}])[-100:]
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
