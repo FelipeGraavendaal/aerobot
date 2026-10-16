@@ -132,7 +132,12 @@ async def fire_spread(lat: float, lon: float, fuel: str = "pastizal", hours: lis
     fm = FUEL_MODELS[fuel]
     hours = hours or [1, 3]
     pf = await point_forecast(lat, lon, hours=25)
-    terrain = await slope_aspect(lat, lon)
+    terrain_note = None
+    try:
+        terrain = await slope_aspect(lat, lon)
+    except Exception as exc:  # sin DEM: se asume terreno plano y se declara
+        terrain = {"elevation_m": pf.elevation_m, "slope_pct": 0.0, "slope_deg": 0.0, "upslope_bearing": 0, "tan": 0.0}
+        terrain_note = f"DEM no disponible ({type(exc).__name__}): se asumió pendiente 0 %."
 
     now = datetime.now(timezone.utc)
     i0 = min(range(len(pf.times)), key=lambda k: abs((pf.times[k] - now).total_seconds()))
@@ -209,5 +214,6 @@ async def fire_spread(lat: float, lon: float, fuel: str = "pastizal", hours: lis
         "formula": "R = I_R·ξ·(1+φ_W+φ_S)/(ρ_b·ε·Q_ig); φ_W = C·U^B·(β/β_op)^−E; φ_S = 5,275·β^−0,3·tan²θ",
         "source": pf.source, "estimated_variables": pf.estimated,
         "notes": ["Estimación de planificación (Rothermel, combustible muerto 1/10/100 h, sin vivo); no reemplaza a CONAF ni a un simulador operativo."]
-                 + (["Modelo 4 sin componente vivo: la tasa puede sobrestimarse hasta ~2×."] if fuel == "matorral_denso" else []),
+                 + (["Modelo 4 sin componente vivo: la tasa puede sobrestimarse hasta ~2×."] if fuel == "matorral_denso" else [])
+                 + ([terrain_note] if terrain_note else []),
     }

@@ -53,8 +53,9 @@ def profile_at(pf, i) -> dict:
     beta_low = math.dist(u10, u50) / 40 if u10 and u50 else None
     beta_mid = math.dist(u50, u80) / 30 if u50 and u80 else None
     betas = [b for b in (beta_low, beta_mid) if b is not None]
+    r1 = lambda x: None if x is None else round(x, 1)  # noqa: E731
     return {
-        "v10_kt": v10, "v50_kt": None if v50 is None else round(v50, 1), "v80_kt": v80, "v120_kt": v120,
+        "v10_kt": r1(v10), "v50_kt": r1(v50), "v80_kt": r1(v80), "v120_kt": r1(v120),
         "dir10": d10, "dir120": d120, "alpha": None if alpha is None else round(alpha, 3),
         "beta_10_50": None if beta_low is None else round(beta_low, 4),
         "beta_50_80": None if beta_mid is None else round(beta_mid, 4),
@@ -151,7 +152,8 @@ async def go_no_go(lat: float, lon: float, hours: int = 24, max_wind_kt: float =
     calc = (f"β(10–50 m) = |ΔV⃗|/ΔZ = {p['beta_10_50']} s⁻¹; β(50–80 m) = {p['beta_50_80']} s⁻¹ ({v50_txt})"
             if p["beta_max"] is not None else "β no calculable")
     summary = (f"{verdict} {_local(p['time'], tz)} hora local · viento 10/50/80/120 m: "
-               f"{p['v10_kt']}/{p['v50_kt']}/{p['v80_kt']}/{p['v120_kt']} kt · ráfaga {p['gust10_kt']} kt · {calc}")
+               f"{p['v10_kt']}/{p['v50_kt']}/{p['v80_kt']}/{p['v120_kt']} kt · ráfaga "
+               f"{'s/d' if p['gust10_kt'] is None else round(p['gust10_kt'], 1)} kt · {calc}")
     if p["reasons"]:
         summary += " · Motivos: " + "; ".join(p["reasons"])
     return {
